@@ -1,0 +1,8 @@
+# Ignoring output files
+._gs_cuda.cuda
+._gs_seq.cuda
+._Makefile
+gs_cuda
+gs_cuda.o
+gs_seq
+gs_seq.o
