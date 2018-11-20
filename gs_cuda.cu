@@ -106,18 +106,32 @@ int main(int argc, char *argv[]) {
 
 
 	// Passing data from host to device
-    cudaMemcpy(dev_mat, host_mat, mem_size, cudaMemcpyHostToDevice);
+	cudaMemcpy(dev_mat, host_mat, mem_size, cudaMemcpyHostToDevice);
 
+
+	/*
+	// define grid and block size
+    int numBlocks = 8;
+    int numThreadsPerBlock = 8;
+
+    // Configure and launch kernel
+    dim3 dimGrid();
+    dim3 dimBlock();
+    myFirstKernel<<<  ,  >>>(  );
+
+    // block until the device has completed
+    cudaThreadSynchronize();
+	*/
 
 	solver(&a, n, n);
 
 
 	// Passing data back from the device to the host
-    cudaMemcpy(host_mat, dev_mat, mem_size, cudaMemcpyDeviceToHost);
+	cudaMemcpy(host_mat, dev_mat, mem_size, cudaMemcpyDeviceToHost);
 
 	// Finally, the matrices are freed
-    cudaFree(dev_mat);
-    free(host_mat);
+	cudaFree(dev_mat);
+	free(host_mat);
 
 	return 0;
 }
