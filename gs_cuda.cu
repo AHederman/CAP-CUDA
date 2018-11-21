@@ -48,8 +48,8 @@ void allocate_dev_matrix(float **mat, int n, int m) {
 
 
 
-// Solver
-void solver(float ***mat, int n, int m) {
+// Solver (TODO)
+__global__ void solver(float **mat, int n, int m) {
 
 	float diff = 0, temp;
 	int done = 0, cnt_iter = 0, i, j;
@@ -85,7 +85,7 @@ void solver(float ***mat, int n, int m) {
 int main(int argc, char *argv[]) {
 
 	int n, communication;
-	float *host_mat, *dev_matrix;
+	float *host_mat_org, *host_mat_dest, *dev_matrix;
 
 	if (argc < 2) {
 		printf("Call this program with two parameters: matrix_size communication\n");
@@ -101,37 +101,37 @@ int main(int argc, char *argv[]) {
 	size_t mem_size = calc_mem_size(n, n);
 
 	// Allocating matrices space both in host and device
-	allocate_host_matrix(&host_mat, n, n);
+	allocate_host_matrix(&host_mat_org, n, n);
+	allocate_host_matrix(&host_mat_dest, n, n);
 	allocate_dev_matrix(&dev_mat, n, n);
 
 
 	// Passing data from host to device
-	cudaMemcpy(dev_mat, host_mat, mem_size, cudaMemcpyHostToDevice);
+	cudaMemcpy(dev_mat, host_mat_org, mem_size, cudaMemcpyHostToDevice);
 
 
 	/*
 	// define grid and block size
-    int numBlocks = 8;
-    int numThreadsPerBlock = 8;
+	int numBlocks = 8;
+	int numThreadsPerBlock = 8;
 
-    // Configure and launch kernel
-    dim3 dimGrid();
-    dim3 dimBlock();
-    myFirstKernel<<<  ,  >>>(  );
+	// Configure and launch kernel
+	dim3 dimGrid();
+	dim3 dimBlock();
+	solver<<<dimGrid,dimBlock>>>(&dev_mat, n, n);
 
-    // block until the device has completed
-    cudaThreadSynchronize();
+	// block until the device has completed
+	cudaThreadSynchronize();
 	*/
-
-	solver(&a, n, n);
 
 
 	// Passing data back from the device to the host
-	cudaMemcpy(host_mat, dev_mat, mem_size, cudaMemcpyDeviceToHost);
+	cudaMemcpy(host_mat_dest, dev_mat, mem_size, cudaMemcpyDeviceToHost);
 
 	// Finally, the matrices are freed
 	cudaFree(dev_mat);
-	free(host_mat);
+	free(host_mat_org);
+	free(host_mat_dest);
 
 	return 0;
 }
