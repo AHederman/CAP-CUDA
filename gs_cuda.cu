@@ -1,5 +1,6 @@
 #include <stdio.h>
 #include <stdlib.h>
+#include <math.h>
 #include <time.h>
 
 
@@ -49,46 +50,46 @@ void allocate_dev_matrix(float **mat, int n, int m) {
 
 
 
-// Solver (TODO)
-__global__ void solver(float **mat, int n, int m, int num_elems) {
+// Solver (executed by each thread)
+__global__ void solver(float **mat, int n) {
+
+	// Position this thread is going to compute
+	int i = (blockDim.x * blockIdx.x) + threadIdx.x;
+	i = i + n;	// VIP: The threads must avoid first row
+	i = i + 1;	// VIP: The threads must avoid first column
+
+	// In case the thread is leftover
+	if (i > ((n*n) - n - 2)) {
+		return 0;
+	}
+
 
 	float diff = 0, temp;
-	int done = 0, cnt_iter = 0, i, j;
+	int done = 0, cnt_iter = 0;
 
-	while (!threadIdx.done && (threadIdx.cnt_iter < MAX_ITER)) {
+	while (!done && (cnt_iter < MAX_ITER)) {
 		diff = 0;
-		
-		// No termino de tener muy claro que esto sea asi, pero :D
-		for (i = 1; i < n - 1; i++) {
-  			for (j = 1; j < m - 1; j++) {
-				(*mat)[threadIdx.i*m + threadIdx.j] = 0.2 * ((*mat)[threadIdx.i*m + threadIdx.j] + 
-									     (*mat)[threadIdx.i*m + (threadIdx.j - 1)] + 
-									     (*mat)[(threadIdx.i - 1)*m + threadIdx.j] + 
-									     (*mat)[threadIdx.i*m + (threadIdx.j + 1)] + 
-									     (*mat)[(threadIdx.i + 1)*m + threadIdx.j]);
-				threadIdx.diff += abs((*mat)[threadIdx.i*m + threadIdx.j] - threadIdx.temp);
-		
-			}
-		}
-		/*for (i = 1; i < n - 1; i++) {
-			for (j = 1; j < m - 1; j++) {
-				temp = (*mat)[i][j];
-				(*mat)[i][j] = 0.2 * ((*mat)[i][j] + (*mat)[i][j - 1] + (*mat)[i - 1][j] + (*mat)[i][j + 1] + (*mat)[i + 1][j]);
-				diff += abs((*mat)[i][j] - temp);
-			}
-		}*/
 
-		if (threadIdx.diff/n/n < TOL) {
-			threadIdx.done = 1; 
+		int pos_up = i - n;
+		int pos_do = i + n;
+		int pos_le = i - 1;
+		int pos_ri = i + 1;
+
+		temp = (*mat)[i];
+		(*mat)[i] = 0.2 * ((*mat)[i] + (*mat)[pos_le] + (*mat)[pos_up] + (*mat)[pos_ri] + (*mat)[pos_do]);
+		diff += abs((*mat)[i] - temp);
+
+		if (diff/n/n < TOL) {
+			done = 1;
 		}
-		threadIdx.cnt_iter ++;
+		cnt_iter ++;
 	}
 
-	if (threadIdx.done) {
-		printf("Solver converged after %d iterations\n", threadIdx.cnt_iter);
+	if (done) {
+		printf("Solver converged after %d iterations\n", cnt_iter);
 	}
 	else {
-		printf("Solver not converged after %d iterations\n", threadIdx.cnt_iter);
+		printf("Solver not converged after %d iterations\n", cnt_iter);
 	}
 }
 
@@ -96,11 +97,10 @@ __global__ void solver(float **mat, int n, int m, int num_elems) {
 
 
 int main(int argc, char *argv[]) {
-	// Primera medida sobre el tiempo total
-	clock_t ttime, extime;
-	ttime = clock();
-	
-	int n, communication;
+
+	// Start recording the time
+	clock_t total_time = clock();
+
 	float *host_mat_org, *host_mat_dest, *dev_matrix;
 
 	if (argc < 2) {
@@ -109,7 +109,7 @@ int main(int argc, char *argv[]) {
 		exit(1);
 	}
 
-	n = atoi(argv[1]);
+	int n = atoi(argv[1]);
 	printf("Matrix size = %d\n", n);
 
 
@@ -131,34 +131,37 @@ int main(int argc, char *argv[]) {
 	// Dejar el tamaño del bloque fijo.
 		No se pueden crear bloques mayores a 1024x1024
 		Para hacer pruebas, cambiar el numero de bloques para ver como varian los resultados
-			Para hacer esto esta bien parametrizarlo para recibirlo como input a la hora de hacer las pruebas
-			Para evitar tener que estar cambiando el fichero en cada ejecucion y eso.
+		Para hacer esto esta bien parametrizarlo para recibirlo como input a la hora de hacer las pruebas
+		Para evitar tener que estar cambiando el fichero en cada ejecucion y eso.
 		Como nos dijo el otro dia, intentar siempre que sea divisible entre 32
 		Al depurar el kernel no se pueden poner prints para depurar, lo quitaron a partir de la version 8. 
-			Consejo: tener un vector de control que se pueda copiar al host para poder trazar errores y esas cosas.
+		Consejo: tener un vector de control que se pueda copiar al host para poder trazar errores y esas cosas.
 		Si no converge, se puede cambiar el factor TOL para que converja, lo interesante es ver que hace CUDA no que 
 		fufe el algoritmo perfectamente con una convergencia que cuadre.
 	//////////////////////////////////////////////////////////////////////////////
-	
-	// define grid and block size
-	int numBlocks = 8;
-	int numThreadsPerBlock = 8;
-
-	// Configure and launch kernel
-	dim3 dimGrid();
-	dim3 dimBlock();
-	
-	// Medida sobre el tiempo de ejecucion
-	extime = clock();
-	
-	solver<<<dimGrid,dimBlock>>>(&dev_mat, n, n, num_elems);
-	
-	// Fin del tiempo de ejecucion
-	extime = clock() - extime;
-	
-	// block until the device has completed
-	cudaThreadSynchronize();
 	*/
+
+
+	// TODO: Adjust
+	int core_dim = (n-2) * (n-2);
+
+	// Given a constant number of threads per block, determine the blocks
+	int numThreadsPerBlock = 32;
+	int numBlocks = (int) ceil(core_dim / numThreadsPerBlock);
+
+	dim3 dimGrid(numBlocks);
+	dim3 dimBlock(numThreadsPerBlock);
+
+
+	// Time before the execution
+	clock_t exec_time = clock();
+
+	// Make all the threads synchronous
+	solver<<< dimGrid, dimBlock >>>(&dev_mat, n);
+	cudaThreadSynchronize();
+
+	// Time after the execution
+	exec_time = clock() - exec_time;
 
 
 	// Passing data back from the device to the host
@@ -168,26 +171,25 @@ int main(int argc, char *argv[]) {
 	cudaFree(dev_mat);
 	free(host_mat_org);
 	free(host_mat_dest);
-	
-	// Fin del tiempo total
-	ttime = clock() - ttime;
-	
-	//Mensaje final e imprimir en fichero
-	printf("Total time: %f\n", ttime);
-	printf("Operations time: %f\n", extime);
+
+
+	// Finish recording the time
+	total_time = clock() - total_time;
+
+	// Data to a file
+	printf("Total time: %f\n", total_time);
+	printf("Operations time: %f\n", exec_time);
 
 	FILE *f;
 	if (access("results.csv", F_OK) == -1) {
  		f = fopen("results.csv", "a");
-		fprintf(f, "Matrix size;Block size;Total time;Size;Operations time;\n");
+		fprintf(f, "Matrix size;Block size;Threads Number;Total time;Operations time;\n");
 	}
 	else {
 		f = fopen("results.csv", "a");
 	}
 
-	fprintf(f, "%d;%d;%f;%f;\n", n, dimBlock(), ttime, extime);
+	fprintf(f, "%d;%d;%d;%f;%f;\n", n, numBlocks, numThreadsPerBlock, total_time, exec_time);
 	fclose(f);
-
-	
 	return 0;
 }
