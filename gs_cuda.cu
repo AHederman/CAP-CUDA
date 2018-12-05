@@ -59,6 +59,7 @@ __global__ void solver(float **mat, int n) {
 	i = i + 1;	// VIP: The threads must avoid first column
 
 	// In case the thread is leftover
+	// revisar esto, se esta haciendo un redondeo hacia arriba
 	if (i > ((n*n) - n - 2)) {
 		return 0;
 	}
@@ -68,28 +69,21 @@ __global__ void solver(float **mat, int n) {
 	int done = 0, cnt_iter = 0;
 
 	while (!done && (cnt_iter < MAX_ITER)) {
-		diff = 0;
 
-		int pos_up = i - n;
-		int pos_do = i + n;
-		int pos_le = i - 1;
-		int pos_ri = i + 1;
+		const int pos_up = i - n;
+		const int pos_do = i + n;
+		const int pos_le = i - 1;
+		const int pos_ri = i + 1;
 
 		temp = (*mat)[i];
 		(*mat)[i] = 0.2 * ((*mat)[i] + (*mat)[pos_le] + (*mat)[pos_up] + (*mat)[pos_ri] + (*mat)[pos_do]);
 		diff += abs((*mat)[i] - temp);
 
+		// Revisar porque hay que hacer uno por cada iteracion, no casilla --> llevar fuera de la gpu, tener una matriz de diffs
 		if (diff/n/n < TOL) {
 			done = 1;
 		}
 		cnt_iter ++;
-	}
-
-	if (done) {
-		printf("Solver converged after %d iterations\n", cnt_iter);
-	}
-	else {
-		printf("Solver not converged after %d iterations\n", cnt_iter);
 	}
 }
 
@@ -158,6 +152,7 @@ int main(int argc, char *argv[]) {
 
 	// Make all the threads synchronous
 	solver<<< dimGrid, dimBlock >>>(&dev_mat, n);
+	// como estamos usando memcpy esto no hace falta, porque la copia de memoria es sincrona
 	cudaThreadSynchronize();
 
 	// Time after the execution
