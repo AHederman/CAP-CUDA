@@ -3,11 +3,10 @@
 #include <math.h>
 #include <time.h>
 
-
-#define MAX_ITER 100
-
 // Maximum value of the matrix element
 #define MAX 100
+
+#define MAX_ITER 100
 #define TOL 0.000001
 
 
@@ -50,6 +49,27 @@ void allocate_dev_matrix(float **mat, int n, int m) {
 
 
 
+// Write the time results into a CSV file
+void write_to_file(int n, int num_blocks, int num_threads, float total_time, float exec_time) {
+
+	FILE *f;
+	char* file_name = "results.csv";
+
+	if (access(file_name, F_OK) == -1) {
+ 		f = fopen(file_name, "a");
+		fprintf(f, "Matrix size;Blocks;Threads per block;Total time;Operations time;\n");
+	}
+	else {
+		f = fopen(file_name, "a");
+	}
+
+	fprintf(f, "%d;%d;%d;%f;%f;\n", n, num_blocks, num_threads, total_time, exec_time);
+	fclose(f);
+}
+
+
+
+
 // Solver (executed by each thread)
 __global__ void solver(float **mat, int n) {
 
@@ -59,8 +79,7 @@ __global__ void solver(float **mat, int n) {
 	i = i + 1;	// VIP: The threads must avoid first column
 
 	// In case the thread is leftover
-	// revisar esto, se esta haciendo un redondeo hacia arriba
-	if (i > ((n*n) - n - 2)) {
+	if (i >= ((n*n) - n - 1)) {
 		return 0;
 	}
 
@@ -69,7 +88,6 @@ __global__ void solver(float **mat, int n) {
 	int done = 0, cnt_iter = 0;
 
 	while (!done && (cnt_iter < MAX_ITER)) {
-
 		const int pos_up = i - n;
 		const int pos_do = i + n;
 		const int pos_le = i - 1;
@@ -79,7 +97,7 @@ __global__ void solver(float **mat, int n) {
 		(*mat)[i] = 0.2 * ((*mat)[i] + (*mat)[pos_le] + (*mat)[pos_up] + (*mat)[pos_ri] + (*mat)[pos_do]);
 		diff += abs((*mat)[i] - temp);
 
-		// Revisar porque hay que hacer uno por cada iteracion, no casilla --> llevar fuera de la gpu, tener una matriz de diffs
+		// TODO: Revisar porque hay que hacer uno por cada iteracion, no casilla --> llevar fuera de la gpu, tener una matriz de diffs
 		if (diff/n/n < TOL) {
 			done = 1;
 		}
@@ -92,23 +110,27 @@ __global__ void solver(float **mat, int n) {
 
 int main(int argc, char *argv[]) {
 
-	// Start recording the time
-	clock_t total_time = clock();
-
-	float *host_mat_org, *host_mat_dest, *dev_matrix;
-
-	if (argc < 2) {
-		printf("Call this program with two parameters: matrix_size communication\n");
+	if (argc < 3) {
+		printf("Call this program with two parameters:\n");
 		printf("\t matrix_size: Add 2 to a power of 2 (e.g. : 18, 1026)\n");
+		printf("\t threads_per_block: Better a power of 2 (e.g. : 16, 32, 64)\n");
 		exit(1);
 	}
 
 	int n = atoi(argv[1]);
+	int threads_per_block = atoi(argv[2]);
 	printf("Matrix size = %d\n", n);
+	printf("Threads per block = %d\n", threads_per_block);
+
+
+	// Start recording the time
+	clock_t i_total_t = clock();
 
 
 	// Calculating the memory size for allocating (bytes)
 	size_t mem_size = calc_mem_size(n, n);
+
+	float *host_mat_org, *host_mat_dest, *dev_matrix;
 
 	// Allocating matrices space both in host and device
 	allocate_host_matrix(&host_mat_org, n, n);
@@ -120,47 +142,32 @@ int main(int argc, char *argv[]) {
 	cudaMemcpy(dev_mat, host_mat_org, mem_size, cudaMemcpyHostToDevice);
 
 
-	/*	
-	//////////////////////// COSAS QUE HA DICHO EL PROFE ////////////////////////
-	// Dejar el tamaño del bloque fijo.
-		No se pueden crear bloques mayores a 1024x1024
-		Para hacer pruebas, cambiar el numero de bloques para ver como varian los resultados
-		Para hacer esto esta bien parametrizarlo para recibirlo como input a la hora de hacer las pruebas
-		Para evitar tener que estar cambiando el fichero en cada ejecucion y eso.
-		Como nos dijo el otro dia, intentar siempre que sea divisible entre 32
-		Al depurar el kernel no se pueden poner prints para depurar, lo quitaron a partir de la version 8. 
-		Consejo: tener un vector de control que se pueda copiar al host para poder trazar errores y esas cosas.
-		Si no converge, se puede cambiar el factor TOL para que converja, lo interesante es ver que hace CUDA no que 
-		fufe el algoritmo perfectamente con una convergencia que cuadre.
-	//////////////////////////////////////////////////////////////////////////////
-	*/
-
-
-	// TODO: Adjust
+	// Calculate the number of threads to launch (1 per core cell)
 	int core_dim = (n-2) * (n-2);
 
 	// Given a constant number of threads per block, determine the blocks
-	int numThreadsPerBlock = 32;
-	int numBlocks = (int) ceil(core_dim / numThreadsPerBlock);
-
-	dim3 dimGrid(numBlocks);
-	dim3 dimBlock(numThreadsPerBlock);
+	int num_blocks = (int) ceil(core_dim / threads_per_block);
+	dim3 dimGrid(num_blocks);
+	dim3 dimBlock(threads_per_block);
 
 
 	// Time before the execution
-	clock_t exec_time = clock();
+	clock_t i_exec_t = clock();
 
 	// Make all the threads synchronous
 	solver<<< dimGrid, dimBlock >>>(&dev_mat, n);
-	// como estamos usando memcpy esto no hace falta, porque la copia de memoria es sincrona
-	cudaThreadSynchronize();
 
-	// Time after the execution
-	exec_time = clock() - exec_time;
+	// The ThreadSynchronize would be neccesary in case Memcpy is not done
+	// However, as it is called later on, the following line is commented
+	// cudaThreadSynchronize();
+
+	// Time before the execution
+	clock_t f_exec_t = clock();
 
 
 	// Passing data back from the device to the host
 	cudaMemcpy(host_mat_dest, dev_mat, mem_size, cudaMemcpyDeviceToHost);
+
 
 	// Finally, the matrices are freed
 	cudaFree(dev_mat);
@@ -169,22 +176,15 @@ int main(int argc, char *argv[]) {
 
 
 	// Finish recording the time
-	total_time = clock() - total_time;
+	clock_t f_total_t = clock();
 
-	// Data to a file
+
+	float total_time = (float)(f_total_t - i_total_t) / CLOCKS_PER_SEC;
+	float exec_time = (float)(f_exec_t - i_exec_t) / CLOCKS_PER_SEC;
 	printf("Total time: %f\n", total_time);
 	printf("Operations time: %f\n", exec_time);
 
-	FILE *f;
-	if (access("results.csv", F_OK) == -1) {
- 		f = fopen("results.csv", "a");
-		fprintf(f, "Matrix size;Block size;Threads Number;Total time;Operations time;\n");
-	}
-	else {
-		f = fopen("results.csv", "a");
-	}
 
-	fprintf(f, "%d;%d;%d;%f;%f;\n", n, numBlocks, numThreadsPerBlock, total_time, exec_time);
-	fclose(f);
+	write_to_file(n, num_blocks, threads_per_block, total_time, exec_time);
 	return 0;
 }
