@@ -1,7 +1,9 @@
 #include <stdio.h>
 #include <stdlib.h>
+#include <stdbool.h>
 #include <math.h>
 #include <time.h>
+
 
 // Maximum value of the matrix element
 #define MAX 100
@@ -28,12 +30,30 @@ int calc_mem_size(int n, int m) {
 
 
 
+// Calculates the sum of a given flat matrix (array)
+float calc_mat_sum(**mat, int n, int m) {
+
+	float sum = 0.0;
+	for (int i = 0; i < (n*m); i++) {
+		sum = sum + (*mat)[i];
+	}
+
+	return sum;
+}
+
+
+
+
 // Allocate 2D matrix in the host
-void allocate_host_matrix(float **mat, int n, int m) {
+void alloc_host_matrix(float **mat, int n, int m, bool must_init) {
 
 	*mat = (float *) malloc(n * m * sizeof(float));
-	for (int i = 0; i < (n*m); i++) {
-		(*mat)[i] = rand_float(MAX);
+
+	// In case of initializing the matrix with the initial values
+	if (must_init) {
+		for (int i = 0; i < (n*m); i++) {
+			(*mat)[i] = rand_float(MAX);
+		}
 	}
 }
 
@@ -41,7 +61,7 @@ void allocate_host_matrix(float **mat, int n, int m) {
 
 
 // Allocate 2D matrix in the device
-void allocate_dev_matrix(float **mat, int n, int m) {
+void alloc_dev_matrix(float **mat, int n, int m) {
 	size_t memSize = (n * m * sizeof(float));
 	cudaMalloc(&mat, memSize);
 }
@@ -71,10 +91,13 @@ void write_to_file(int n, int num_blocks, int num_threads, float total_time, flo
 
 
 // Solver (executed by each thread)
-__global__ void solver(float **mat, int n) {
+__global__ void solver(float **mat, float **mat_diff, int n) {
 
-	// Position this thread is going to compute
-	int i = (blockDim.x * blockIdx.x) + threadIdx.x;
+	// Original position that this thread is assigned
+	int i_org = (blockDim.x * blockIdx.x) + threadIdx.x;
+
+	// Real position that this thread is going to compute
+	int i = i_org;
 	i = i + n;	// VIP: The threads must avoid first row
 	i = i + 1;	// VIP: The threads must avoid first column
 
@@ -84,10 +107,11 @@ __global__ void solver(float **mat, int n) {
 	}
 
 
-	float diff = 0, temp;
-	int done = 0, cnt_iter = 0;
+	float temp;
+	float diff = 0;
+	int cnt_iter = 0;
 
-	while (!done && (cnt_iter < MAX_ITER)) {
+	while (cnt_iter < MAX_ITER) {
 		const int pos_up = i - n;
 		const int pos_do = i + n;
 		const int pos_le = i - 1;
@@ -95,14 +119,15 @@ __global__ void solver(float **mat, int n) {
 
 		temp = (*mat)[i];
 		(*mat)[i] = 0.2 * ((*mat)[i] + (*mat)[pos_le] + (*mat)[pos_up] + (*mat)[pos_ri] + (*mat)[pos_do]);
-		diff += abs((*mat)[i] - temp);
 
-		// TODO: Revisar porque hay que hacer uno por cada iteracion, no casilla --> llevar fuera de la gpu, tener una matriz de diffs
-		if (diff/n/n < TOL) {
-			done = 1;
-		}
+		// The differences between the prev value VS new value is stored 
+		diff += abs((*mat)[i] - temp);
 		cnt_iter ++;
 	}
+
+	// Finally the difference is store in its corresponding cell
+	// VIP: Use '=' not '+=' to avoid non-zero values on the first func call
+	(*mat_diff)[i_org] = diff;
 }
 
 
@@ -126,20 +151,24 @@ int main(int argc, char *argv[]) {
 	// Start recording the time
 	clock_t i_total_t = clock();
 
-
-	// Calculating the memory size for allocating (bytes)
-	size_t mem_size = calc_mem_size(n, n);
-
-	float *host_mat_org, *host_mat_dest, *dev_matrix;
+	float *host_mat_vals;
+	float *host_mat_diff;
+	float *dev_mat_vals;
+	float *dev_mat_diff;
 
 	// Allocating matrices space both in host and device
-	allocate_host_matrix(&host_mat_org, n, n);
-	allocate_host_matrix(&host_mat_dest, n, n);
-	allocate_dev_matrix(&dev_mat, n, n);
+	alloc_host_matrix(&host_mat_vals, n, n, true);
+	alloc_host_matrix(&host_mat_diff, n-2, n-2, false);
+	alloc_dev_matrix(&dev_mat_vals, n, n);
+	alloc_dev_matrix(&dev_mat_diff, n-2, n-2);
 
+
+	// Calculating the memory size for allocating (bytes)
+	size_t all_mat_size = calc_mem_size(n, n);
+	size_t core_mat_size = calc_mem_size(n-2, n-2);
 
 	// Passing data from host to device
-	cudaMemcpy(dev_mat, host_mat_org, mem_size, cudaMemcpyHostToDevice);
+	cudaMemcpy(dev_mat_vals, host_mat_vals, all_mat_size, cudaMemcpyHostToDevice);
 
 
 	// Calculate the number of threads to launch (1 per core cell)
@@ -153,26 +182,39 @@ int main(int argc, char *argv[]) {
 
 	// Time before the execution
 	clock_t i_exec_t = clock();
+ 
+	while (true) {
 
-	// Make all the threads synchronous
-	solver<<< dimGrid, dimBlock >>>(&dev_mat, n);
+		// Make all the threads synchronous
+		solver<<< dimGrid, dimBlock >>>(&dev_mat_vals, &dev_mat_diff, n);
 
-	// The ThreadSynchronize would be neccesary in case Memcpy is not done
-	// However, as it is called later on, the following line is commented
-	// cudaThreadSynchronize();
+		// The ThreadSynchronize would be neccesary in case Memcpy is not done
+		// However, as it is called later on, the following line is commented
+		// cudaThreadSynchronize();
+
+		// Passing the differential data back from the device to the host
+		cudaMemcpy(host_mat_diff, dev_mat_diff, core_mat_size, cudaMemcpyDeviceToHost);
+
+		// Breaks in case of reaching the TOL threshold
+		float diffs_sum = calc_mat_sum(&host_mat_diff, n-2, n-2);
+		if (diffs_sum/n/n < TOL) {
+			break;
+		}
+	}
 
 	// Time before the execution
 	clock_t f_exec_t = clock();
 
 
 	// Passing data back from the device to the host
-	cudaMemcpy(host_mat_dest, dev_mat, mem_size, cudaMemcpyDeviceToHost);
+	cudaMemcpy(host_mat_vals, dev_mat_vals, all_mat_size, cudaMemcpyDeviceToHost);
 
 
 	// Finally, the matrices are freed
-	cudaFree(dev_mat);
-	free(host_mat_org);
-	free(host_mat_dest);
+	cudaFree(dev_mat_vals);
+	cudaFree(dev_mat_diff);
+	free(host_mat_vals);
+	free(host_mat_diff);
 
 
 	// Finish recording the time
