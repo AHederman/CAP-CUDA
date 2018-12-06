@@ -9,7 +9,7 @@
 #define MAX 100
 
 #define MAX_ITER 100
-#define TOL 0.000001
+#define TOL 0.0001
 
 
 
@@ -35,7 +35,7 @@ float calc_mat_sum(**mat, int n, int m) {
 
 	float sum = 0.0;
 	for (int i = 0; i < (n*m); i++) {
-		sum = sum + (*mat)[i];
+		sum += (*mat)[i];
 	}
 
 	return sum;
@@ -120,8 +120,8 @@ __global__ void solver(float **mat, float **mat_diff, int n) {
 		temp = (*mat)[i];
 		(*mat)[i] = 0.2 * ((*mat)[i] + (*mat)[pos_le] + (*mat)[pos_up] + (*mat)[pos_ri] + (*mat)[pos_do]);
 
-		// The differences between the prev value VS new value is stored 
-		diff += abs((*mat)[i] - temp);
+		// The LAST difference between the prev value and the new value is stored 
+		diff = abs((*mat)[i] - temp);
 		cnt_iter ++;
 	}
 
@@ -197,7 +197,8 @@ int main(int argc, char *argv[]) {
 
 		// Breaks in case of reaching the TOL threshold
 		float diffs_sum = calc_mat_sum(&host_mat_diff, n-2, n-2);
-		if (diffs_sum/n/n < TOL) {
+		float diffs_mean = diffs_sum / (n-2) / (n-2);
+		if (diffs_mean < TOL) {
 			break;
 		}
 	}
