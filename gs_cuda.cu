@@ -1,6 +1,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <stdbool.h>
+#include <unistd.h>
 #include <math.h>
 #include <time.h>
 
@@ -9,7 +10,7 @@
 #define MAX 100
 
 #define MAX_ITER 100
-#define TOL 0.0001
+#define TOL 0.000001
 
 
 
@@ -31,10 +32,10 @@ int calc_mem_size(int n, int m) {
 
 
 // Calculates the sum of a given flat matrix (array)
-float calc_mat_sum(**mat, int n, int m) {
+float calc_mat_sum(float **mat, int n, int m) {
 
-	float sum = 0.0;
-	for (int i = 0; i < (n*m); i++) {
+	float sum = 0.0f;
+	for (long i = 0; i < (n*m); i++) {
 		sum += (*mat)[i];
 	}
 
@@ -103,7 +104,7 @@ __global__ void solver(float **mat, float **mat_diff, int n) {
 
 	// In case the thread is leftover
 	if (i >= ((n*n) - n - 1)) {
-		return 0;
+		return;
 	}
 
 
