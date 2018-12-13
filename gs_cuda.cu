@@ -112,11 +112,12 @@ __global__ void solver(float **mat, float **mat_diff, int n) {
 	float diff = 0;
 	int cnt_iter = 0;
 
+	const int pos_up = i - n;
+	const int pos_do = i + n;
+	const int pos_le = i - 1;
+	const int pos_ri = i + 1;
+
 	while (cnt_iter < MAX_ITER) {
-		const int pos_up = i - n;
-		const int pos_do = i + n;
-		const int pos_le = i - 1;
-		const int pos_ri = i + 1;
 
 		temp = (*mat)[i];
 		(*mat)[i] = 0.2 * ((*mat)[i] + (*mat)[pos_le] + (*mat)[pos_up] + (*mat)[pos_ri] + (*mat)[pos_do]);
