@@ -1,7 +1,5 @@
 #!/bin/bash
 
-module load cuda/8.0
-
 block_sizes=(16 32 64 128 256)
 matrix_sizes=(2050 4098 8198)
 
